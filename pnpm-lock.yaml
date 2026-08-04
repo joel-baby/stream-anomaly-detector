@@ -207,6 +207,25 @@ importers:
 
   .: {}
 
+  apps/consumer:
+    dependencies:
+      '@upstash/redis':
+        specifier: ^1.38.1
+        version: 1.38.1
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
+      tsx:
+        specifier: ^4.23.5
+        version: 4.23.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   apps/producer:
     dependencies:
       '@upstash/redis':
