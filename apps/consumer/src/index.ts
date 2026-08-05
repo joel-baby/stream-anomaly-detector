@@ -72,9 +72,16 @@ async function main() {
         for (const [id, fields] of messages) {
           const { userId, amount, timestamp } = fieldsToObject(fields);
 
-          console.log(`[consumed] id=${id} user=${userId} amount=$${amount}`);
+          const ts = parseInt(timestamp, 10);
+          const amt = parseFloat(amount);
 
-          // Windowing/anomaly logic goes here — next step.
+          await recordInWindow(userId, amt, ts);
+          const stats = await getWindowStats(userId, ts);
+
+          console.log(
+            `[consumed] id=${id} user=${userId} amount=$${amount}  ` +
+              `| window(5m): count=${stats.count} totalSpend=$${stats.totalSpend.toFixed(2)}`,
+          );
 
           await redis.xack(STREAM_KEY, GROUP_NAME, id);
         }
@@ -84,6 +91,56 @@ async function main() {
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
+}
+
+const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+
+function windowKey(userId: string): string {
+  return `${PREFIX}:window:${userId}`;
+}
+
+// Records this event in the user's rolling window, then trims anything
+// older than WINDOW_MS out of the set — this is the "aging out" step.
+async function recordInWindow(
+  userId: string,
+  amount: number,
+  timestampMs: number,
+) {
+  const key = windowKey(userId);
+
+  // Store amount as the member (so we can sum it later), timestamp as the score.
+  // We tack the event id-ish suffix on so repeated identical amounts don't collide
+  // as the same ZSET member.
+  const member = `${amount}:${timestampMs}:${Math.random().toString(36).slice(2, 7)}`;
+
+  await redis.zadd(key, { score: timestampMs, member });
+
+  // Remove anything older than the window from this user's set.
+  const cutoff = timestampMs - WINDOW_MS;
+  await redis.zremrangebyscore(key, 0, cutoff);
+
+  // Let this key expire on its own if the user goes quiet, so we don't
+  // keep empty/stale keys around forever.
+  await redis.expire(key, Math.ceil(WINDOW_MS / 1000) * 2);
+}
+
+// Returns { count, totalSpend } for everything currently in this user's window.
+async function getWindowStats(userId: string, timestampMs: number) {
+  const key = windowKey(userId);
+  const cutoff = timestampMs - WINDOW_MS;
+
+  // Get all members currently in the window (score > cutoff).
+  const members = (await redis.zrange(key, cutoff, "+inf", {
+    byScore: true,
+  })) as string[];
+
+  let totalSpend = 0;
+  for (const member of members) {
+    const [amountStr] = member.split(":");
+    totalSpend += parseFloat(amountStr);
+  }
+
+  return { count: members.length, totalSpend };
 }
 
 main();
