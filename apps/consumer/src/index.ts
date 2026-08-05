@@ -11,6 +11,31 @@ const STREAM_KEY = `${PREFIX}:transactions`;
 const GROUP_NAME = `${PREFIX}:consumer-group`;
 const CONSUMER_NAME = "consumer-1"; // unique per consumer if you ever run more than one
 
+const BASELINE_UPDATE_INTERVAL_MS = parseInt(
+  process.env.BASELINE_UPDATE_INTERVAL_MS ?? "60000",
+  10,
+);
+
+function baselineTimestampKey(userId: string): string {
+  return `${PREFIX}:baseline-updated:${userId}`;
+}
+
+// Returns true if enough time has passed since we last updated this
+// user's baseline — this throttles updates so a burst can't teach the
+// baseline to treat itself as normal while it's still happening.
+async function shouldUpdateBaseline(
+  userId: string,
+  nowMs: number,
+): Promise<boolean> {
+  const lastUpdate = await redis.get<number>(baselineTimestampKey(userId));
+  if (lastUpdate === null) return true;
+  return nowMs - lastUpdate >= BASELINE_UPDATE_INTERVAL_MS;
+}
+
+async function markBaselineUpdated(userId: string, nowMs: number) {
+  await redis.set(baselineTimestampKey(userId), nowMs);
+}
+
 // One-time setup: create the consumer group if it doesn't already exist.
 // "$" = start from new events only, ignore anything already in the stream.
 // MKSTREAM = create the stream itself if it doesn't exist yet.
@@ -77,13 +102,30 @@ async function main() {
 
           await recordInWindow(userId, amt, ts);
           const stats = await getWindowStats(userId, ts);
+          const baseline = await getBaseline(userId);
 
-          console.log(
-            `[consumed] id=${id} user=${userId} amount=$${amount}  ` +
-              `| window(5m): count=${stats.count} totalSpend=$${stats.totalSpend.toFixed(2)}`,
-          );
+          const flagged = isAnomalous(stats.count, stats.totalSpend, baseline);
 
-          await redis.xack(STREAM_KEY, GROUP_NAME, id);
+          if (flagged) {
+            console.log(
+              `🚨 [ANOMALY] user=${userId} count=${stats.count} (baseline avg=${baseline.avgCount.toFixed(1)}) ` +
+                `spend=$${stats.totalSpend.toFixed(2)} (baseline avg=$${baseline.avgSpend.toFixed(2)})`,
+            );
+            // Persisting flagged events to Mongo comes in Step 7.
+          } else {
+            console.log(
+              `[consumed] id=${id} user=${userId} amount=$${amount} ` +
+                `| window(5m): count=${stats.count} totalSpend=$${stats.totalSpend.toFixed(2)}`,
+            );
+          }
+
+          // Only fold this window into the baseline if it's NOT flagged, and only
+          // if enough time has passed since the last update. This is what stops
+          // a burst from redefining itself as "normal" while it's still ongoing.
+          if (!flagged && (await shouldUpdateBaseline(userId, ts))) {
+            await updateBaseline(userId, stats.count, stats.totalSpend);
+            await markBaselineUpdated(userId, ts);
+          }
         }
       }
     } catch (err) {
@@ -141,6 +183,74 @@ async function getWindowStats(userId: string, timestampMs: number) {
   }
 
   return { count: members.length, totalSpend };
+}
+
+const ANOMALY_MULTIPLIER = parseFloat(process.env.ANOMALY_MULTIPLIER ?? "4");
+const EWMA_ALPHA = parseFloat(process.env.EWMA_ALPHA ?? "0.2");
+
+function baselineKey(userId: string): string {
+  return `${PREFIX}:baseline:${userId}`;
+}
+
+type Baseline = {
+  avgCount: number;
+  avgSpend: number;
+  samples: number; // how many windows we've factored in so far
+};
+
+// Fetches the user's current baseline, or a sensible empty default
+// if they've never been seen before.
+async function getBaseline(userId: string): Promise<Baseline> {
+  const raw = await redis.get<Baseline>(baselineKey(userId));
+  return raw ?? { avgCount: 0, avgSpend: 0, samples: 0 };
+}
+
+// Nudges the baseline toward the current window's values using EWMA:
+// newAvg = alpha * currentValue + (1 - alpha) * oldAvg
+// In plain terms: blend the new observation into the running average,
+// weighted so recent activity matters but doesn't overwrite history.
+async function updateBaseline(
+  userId: string,
+  currentCount: number,
+  currentSpend: number,
+) {
+  const baseline = await getBaseline(userId);
+
+  const updated: Baseline = {
+    avgCount:
+      baseline.samples === 0
+        ? currentCount
+        : EWMA_ALPHA * currentCount + (1 - EWMA_ALPHA) * baseline.avgCount,
+    avgSpend:
+      baseline.samples === 0
+        ? currentSpend
+        : EWMA_ALPHA * currentSpend + (1 - EWMA_ALPHA) * baseline.avgSpend,
+    samples: baseline.samples + 1,
+  };
+
+  await redis.set(baselineKey(userId), updated);
+  return updated;
+}
+
+// Decides whether the current window looks anomalous relative to baseline.
+// Requires a minimum number of samples so we're not flagging brand-new
+// users just because we have no history yet (that would be a cheap,
+// meaningless "anomaly").
+const MIN_SAMPLES_BEFORE_SCORING = 3;
+
+function isAnomalous(
+  currentCount: number,
+  currentSpend: number,
+  baseline: Baseline,
+): boolean {
+  if (baseline.samples < MIN_SAMPLES_BEFORE_SCORING) return false;
+  if (baseline.avgCount === 0) return false;
+
+  const countRatio = currentCount / baseline.avgCount;
+  const spendRatio =
+    baseline.avgSpend > 0 ? currentSpend / baseline.avgSpend : 0;
+
+  return countRatio >= ANOMALY_MULTIPLIER || spendRatio >= ANOMALY_MULTIPLIER;
 }
 
 main();
