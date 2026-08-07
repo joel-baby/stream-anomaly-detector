@@ -12,7 +12,8 @@
   "type": "module",
   "dependencies": {
     "@upstash/redis": "^1.38.1",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "mongodb": "^7.5.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

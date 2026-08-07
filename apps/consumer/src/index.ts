@@ -1,5 +1,39 @@
 import { Redis } from "@upstash/redis";
 import "dotenv/config";
+import { MongoClient, Collection } from "mongodb";
+
+const mongoClient = new MongoClient(process.env.MONGODB_URI!);
+let flaggedEventsCollection: Collection;
+
+async function connectMongo() {
+  await mongoClient.connect();
+  const db = mongoClient.db(process.env.MONGODB_DB_NAME ?? "stream-anomaly");
+  flaggedEventsCollection = db.collection("flagged_events");
+  console.log("Connected to MongoDB");
+}
+
+type FlaggedEvent = {
+  userId: string;
+  eventId: string;
+  amount: number;
+  timestamp: number;
+  windowCount: number;
+  windowSpend: number;
+  baselineAvgCount: number;
+  baselineAvgSpend: number;
+  flaggedAt: Date;
+};
+
+async function persistFlaggedEvent(event: FlaggedEvent) {
+  try {
+    await flaggedEventsCollection.insertOne(event);
+  } catch (err) {
+    console.error("Failed to persist flagged event to MongoDB:", err);
+    // Deliberately not re-throwing: a Mongo write failure shouldn't crash
+    // the whole consumer or block acknowledging the Redis event. We'll
+    // revisit this tradeoff in Stage 8 (resilience).
+  }
+}
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -70,6 +104,7 @@ function fieldsToObject(fields: string[]): Record<string, string> {
 }
 
 async function main() {
+  await connectMongo();
   await ensureGroupExists();
   console.log(
     `Consumer "${CONSUMER_NAME}" started. Listening on: ${STREAM_KEY}\n`,
@@ -111,7 +146,18 @@ async function main() {
               `🚨 [ANOMALY] user=${userId} count=${stats.count} (baseline avg=${baseline.avgCount.toFixed(1)}) ` +
                 `spend=$${stats.totalSpend.toFixed(2)} (baseline avg=$${baseline.avgSpend.toFixed(2)})`,
             );
-            // Persisting flagged events to Mongo comes in Step 7.
+
+            await persistFlaggedEvent({
+              userId,
+              eventId: id,
+              amount: amt,
+              timestamp: ts,
+              windowCount: stats.count,
+              windowSpend: stats.totalSpend,
+              baselineAvgCount: baseline.avgCount,
+              baselineAvgSpend: baseline.avgSpend,
+              flaggedAt: new Date(),
+            });
           } else {
             console.log(
               `[consumed] id=${id} user=${userId} amount=$${amount} ` +
