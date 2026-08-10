@@ -46,6 +46,25 @@ async function main() {
     res.json({ status: "ok" });
   });
 
+  app.get("/api/stats", async (req, res) => {
+  const stats = await flaggedEvents
+    .aggregate([
+      {
+        $group: {
+          _id: "$userId",
+          flagCount: { $sum: 1 },
+          totalFlaggedSpend: { $sum: "$windowSpend" },
+          lastFlaggedAt: { $max: "$flaggedAt" },
+        },
+      },
+      { $sort: { flagCount: -1 } },
+      { $limit: 10 },
+    ])
+    .toArray();
+
+  res.json(stats);
+});
+
   // Change Streams: MongoDB pushes us a notification the instant a new
   // document is inserted into flagged_events, instead of us having to
   // repeatedly poll the collection. This only works because MongoDB

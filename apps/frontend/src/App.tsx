@@ -1,15 +1,22 @@
 import "./App.css";
 import { LiveTicker } from "./components/LiveTicker";
+import { Waveform } from "./components/Waveform";
+import { Sidebar } from "./components/Sidebar";
 
 function App() {
   return (
     <div className="console">
-      <aside style={{ borderRight: "1px solid var(--color-grid)", padding: "1.5rem" }}>
-        <h2>Instrument Index</h2>
-        <p style={{ color: "var(--color-ink-muted)" }}>Sidebar goes here</p>
+      <aside
+        style={{
+          borderRight: "1px solid var(--color-grid)",
+          padding: "1.5rem",
+        }}
+      >
+        <Sidebar />
       </aside>
       <main style={{ padding: "1.5rem" }}>
-        <h1 style={{ marginBottom: "1.5rem" }}>Live Feed</h1>
+        <Waveform />
+        <h1 style={{ margin: "1.5rem 0" }}>Live Feed</h1>
         <LiveTicker />
       </main>
     </div>
