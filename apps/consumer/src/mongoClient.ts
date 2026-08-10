@@ -9,6 +9,7 @@ export async function connectMongo() {
   const db = mongoClient.db(MONGODB_DB_NAME);
   flaggedEventsCollection = db.collection("flagged_events");
   console.log("Connected to MongoDB");
+  initRawEventsCollection();
 }
 
 export type FlaggedEvent = {
@@ -28,5 +29,28 @@ export async function persistFlaggedEvent(event: FlaggedEvent) {
     await flaggedEventsCollection.insertOne(event);
   } catch (err) {
     console.error("Failed to persist flagged event to MongoDB:", err);
+  }
+}
+
+let rawEventsCollection: Collection;
+
+// Call this from connectMongo(), right after flaggedEventsCollection is set.
+export function initRawEventsCollection() {
+  const db = mongoClient.db(MONGODB_DB_NAME);
+  rawEventsCollection = db.collection("raw_events");
+}
+
+export type RawEvent = {
+  userId: string;
+  eventId: string;
+  amount: number;
+  timestamp: Date; // time-series collections require a real Date, not a number
+};
+
+export async function archiveRawEvent(event: RawEvent) {
+  try {
+    await rawEventsCollection.insertOne(event);
+  } catch (err) {
+    console.error("Failed to archive raw event:", err);
   }
 }

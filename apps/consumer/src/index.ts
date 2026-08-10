@@ -1,13 +1,30 @@
-import { ensureGroupExists, fieldsToObject, readEvents, acknowledge } from "./streamConsumer.js";
+import {
+  ensureGroupExists,
+  fieldsToObject,
+  readEvents,
+  acknowledge,
+} from "./streamConsumer.js";
 import { recordInWindow, getWindowStats } from "./windowing.js";
-import { getBaseline, updateBaseline, isAnomalous, shouldUpdateBaseline, markBaselineUpdated } from "./baseline.js";
-import { connectMongo, persistFlaggedEvent } from "./mongoClient.js";
+import {
+  getBaseline,
+  updateBaseline,
+  isAnomalous,
+  shouldUpdateBaseline,
+  markBaselineUpdated,
+} from "./baseline.js";
+import {
+  connectMongo,
+  persistFlaggedEvent,
+  archiveRawEvent,
+} from "./mongoClient.js";
 import { CONSUMER_NAME, STREAM_KEY } from "./config.js";
 
 async function main() {
   await connectMongo();
   await ensureGroupExists();
-  console.log(`Consumer "${CONSUMER_NAME}" started. Listening on: ${STREAM_KEY}\n`);
+  console.log(
+    `Consumer "${CONSUMER_NAME}" started. Listening on: ${STREAM_KEY}\n`,
+  );
 
   while (true) {
     try {
@@ -23,6 +40,12 @@ async function main() {
           const { userId, amount, timestamp } = fieldsToObject(fields);
           const ts = parseInt(timestamp, 10);
           const amt = parseFloat(amount);
+          await archiveRawEvent({
+            userId,
+            eventId: id,
+            amount: amt,
+            timestamp: new Date(ts),
+          });
 
           await recordInWindow(userId, amt, ts);
           const stats = await getWindowStats(userId, ts);
@@ -32,7 +55,7 @@ async function main() {
           if (flagged) {
             console.log(
               `🚨 [ANOMALY] user=${userId} count=${stats.count} (baseline avg=${baseline.avgCount.toFixed(1)}) ` +
-              `spend=$${stats.totalSpend.toFixed(2)} (baseline avg=$${baseline.avgSpend.toFixed(2)})`
+                `spend=$${stats.totalSpend.toFixed(2)} (baseline avg=$${baseline.avgSpend.toFixed(2)})`,
             );
 
             await persistFlaggedEvent({
@@ -49,7 +72,7 @@ async function main() {
           } else {
             console.log(
               `[consumed] id=${id} user=${userId} amount=$${amount} ` +
-              `| window(5m): count=${stats.count} totalSpend=$${stats.totalSpend.toFixed(2)}`
+                `| window(5m): count=${stats.count} totalSpend=$${stats.totalSpend.toFixed(2)}`,
             );
           }
 
