@@ -1,5 +1,5 @@
 {
-  "name": "apps",
+  "name": "worker",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -14,7 +14,7 @@
   "type": "module",
   "dependencies": {
     "@upstash/redis": "^1.38.2",
-    "bullmq": "^6.0.10",
+    "bullmq": "^6.1.0",
     "dotenv": "^17.4.2",
     "ioredis": "^6.0.0",
     "mongodb": "^7.5.0"

@@ -36,18 +36,25 @@ async function processReplayJob(data: ReplayJobData) {
   let processed = 0;
   let flagged = 0;
 
-  const REPLAY_PREFIX = process.env.REPLAY_KEY_PREFIX ?? "stream-anomaly-replay";
+  const REPLAY_PREFIX =
+    process.env.REPLAY_KEY_PREFIX ?? "stream-anomaly-replay";
   const redisRest = connection; // reuse the same ioredis connection for simplicity here
+
+  const keysToClear = await redisRest.keys(`${REPLAY_PREFIX}:*`);
+  if (keysToClear.length > 0) {
+    await redisRest.del(...keysToClear);
+  }
 
   for await (const doc of cursor) {
     const userId = doc.userId as string;
     const amount = doc.amount as number;
+    const eventId = doc.eventId as string;
     const ts = (doc.timestamp as Date).getTime();
 
     const windowKey = `${REPLAY_PREFIX}:window:${userId}`;
     const baselineKey = `${REPLAY_PREFIX}:baseline:${userId}`;
 
-    const member = `${amount}:${ts}:${Math.random().toString(36).slice(2, 7)}`;
+    const member = `${amount}:${eventId}`; // eventId, not a random string
     await redisRest.zadd(windowKey, ts, member);
     const cutoff = ts - 5 * 60 * 1000;
     await redisRest.zremrangebyscore(windowKey, 0, cutoff);
@@ -69,18 +76,37 @@ async function processReplayJob(data: ReplayJobData) {
       baseline.samples >= 3 &&
       baseline.avgCount > 0 &&
       (count / baseline.avgCount >= multiplier ||
-        (baseline.avgSpend > 0 && totalSpend / baseline.avgSpend >= multiplier));
+        (baseline.avgSpend > 0 &&
+          totalSpend / baseline.avgSpend >= multiplier));
 
     if (isAnomaly) {
       flagged++;
+      console.log(
+        `🚨 flagged user=${userId} count=${count} baselineAvgCount=${baseline.avgCount.toFixed(2)}`,
+      );
     } else {
-      const alpha = parseFloat(process.env.EWMA_ALPHA ?? "0.2");
-      const updated = {
-        avgCount: baseline.samples === 0 ? count : alpha * count + (1 - alpha) * baseline.avgCount,
-        avgSpend: baseline.samples === 0 ? totalSpend : alpha * totalSpend + (1 - alpha) * baseline.avgSpend,
-        samples: baseline.samples + 1,
-      };
-      await redisRest.set(baselineKey, JSON.stringify(updated));
+      const lastUpdateKey = `${REPLAY_PREFIX}:baseline-updated:${userId}`;
+      const lastUpdate = await redisRest.get(lastUpdateKey);
+      const shouldUpdate =
+        !lastUpdate ||
+        ts - parseInt(lastUpdate, 10) >= BASELINE_UPDATE_INTERVAL_MS;
+
+      if (shouldUpdate) {
+        const alpha = parseFloat(process.env.EWMA_ALPHA ?? "0.2");
+        const updated = {
+          avgCount:
+            baseline.samples === 0
+              ? count
+              : alpha * count + (1 - alpha) * baseline.avgCount,
+          avgSpend:
+            baseline.samples === 0
+              ? totalSpend
+              : alpha * totalSpend + (1 - alpha) * baseline.avgSpend,
+          samples: baseline.samples + 1,
+        };
+        await redisRest.set(baselineKey, JSON.stringify(updated));
+        await redisRest.set(lastUpdateKey, ts.toString());
+      }
     }
 
     processed++;
@@ -91,6 +117,8 @@ async function processReplayJob(data: ReplayJobData) {
   return { processed, flagged };
 }
 
+const BASELINE_UPDATE_INTERVAL_MS = 60000; // same interval as the live consumer
+
 // The worker listens for jobs on the queue and runs processReplayJob.
 const worker = new Worker(
   QUEUE_NAME,
@@ -98,7 +126,7 @@ const worker = new Worker(
     console.log(`Starting replay job ${job.id}, range:`, job.data);
     return processReplayJob(job.data as ReplayJobData);
   },
-  { connection }
+  { connection },
 );
 
 worker.on("completed", (job, result) => {
