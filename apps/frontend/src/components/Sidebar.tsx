@@ -1,33 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { socket } from "../socket";
 import type { FlaggedEvent } from "../types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+type Point = { x: number; y: number };
 
-type UserStat = {
-  _id: string;
-  flagCount: number;
-  totalFlaggedSpend: number;
-  lastFlaggedAt: string;
-};
+const WIDTH = 800;
+const HEIGHT = 120;
+const BASELINE_Y = HEIGHT / 2;
+const MAX_POINTS = 120;
+const TICK_MS = 100;
 
-export function Sidebar() {
-  const [stats, setStats] = useState<UserStat[]>([]);
-
-  function loadStats() {
-    fetch(`${API_URL}/api/stats`)
-      .then((res) => res.json())
-      .then(setStats);
-  }
+export function Waveform() {
+  const [points, setPoints] = useState<Point[]>(
+    Array.from({ length: MAX_POINTS }, (_, i) => ({ x: i, y: BASELINE_Y }))
+  );
+  const [isSpiking, setIsSpiking] = useState(false);
+  const pendingSpike = useRef(0);
+  const spikeHeight = useRef(0);
 
   useEffect(() => {
-    loadStats();
-
-    // Refresh the aggregated stats whenever a new anomaly comes in,
-    // rather than trying to update counts by hand on the client —
-    // simpler and always correct, at the cost of one extra fetch per event.
-    function handleAnomaly(_event: FlaggedEvent) {
-      loadStats();
+    function handleAnomaly(event: FlaggedEvent) {
+      const ratio = event.windowCount / (event.baselineAvgCount || 1);
+      const height = Math.min(ratio * 8, HEIGHT / 2 - 10);
+      spikeHeight.current = height;
+      pendingSpike.current = 6;
     }
 
     socket.on("anomaly", handleAnomaly);
@@ -36,40 +32,82 @@ export function Sidebar() {
     };
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPoints((prev) => {
+        let y: number;
+
+        if (pendingSpike.current > 0) {
+          const progress = pendingSpike.current / 6;
+          y = BASELINE_Y - spikeHeight.current * Math.sin(progress * Math.PI);
+          pendingSpike.current -= 1;
+        } else {
+          y = BASELINE_Y + (Math.random() - 0.5) * 3;
+        }
+
+        const next = [...prev.slice(1), { x: 0, y }];
+        return next.map((p, i) => ({ ...p, x: i }));
+      });
+
+      // Update spiking state here, inside the interval callback — not
+      // read directly from the ref during render, which React's rules
+      // now flag as unsafe (ref reads should happen in effects/handlers,
+      // never in the render body itself).
+      setIsSpiking(pendingSpike.current > 0);
+    }, TICK_MS);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${(p.x / (MAX_POINTS - 1)) * WIDTH} ${p.y}`)
+    .join(" ");
+
   return (
-    <div>
-      <h2 style={{ marginBottom: "1rem" }}>Instrument Index</h2>
-      <p className="mono" style={{ fontSize: "0.7rem", color: "var(--color-ink-muted)", marginBottom: "1rem" }}>
-        MOST FLAGGED USERS
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        {stats.length === 0 && (
-          <p style={{ color: "var(--color-ink-muted)", fontSize: "0.85rem" }}>No data yet.</p>
-        )}
-
-        {stats.map((s, i) => (
-          <div
-            key={s._id}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              borderBottom: "1px solid var(--color-grid)",
-              paddingBottom: "0.5rem",
-            }}
-          >
-            <div>
-              <span className="mono" style={{ color: "var(--color-ink-muted)", marginRight: "0.5rem" }}>
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="mono">{s._id}</span>
-            </div>
-            <span className="mono" style={{ color: "var(--color-signal-alert)", fontSize: "0.85rem" }}>
-              {s.flagCount}×
-            </span>
-          </div>
-        ))}
+    <div
+      style={{
+        border: "1px solid var(--color-grid)",
+        background: "var(--color-panel)",
+        padding: "1rem",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: "0.5rem",
+        }}
+      >
+        <span className="mono" style={{ fontSize: "0.75rem", color: "var(--color-ink-muted)" }}>
+          SIGNAL DEVIATION
+        </span>
+        <span
+          className="mono"
+          style={{
+            fontSize: "0.75rem",
+            color: isSpiking ? "var(--color-signal-alert)" : "var(--color-signal-safe)",
+          }}
+        >
+          {isSpiking ? "● ANOMALY" : "● NOMINAL"}
+        </span>
       </div>
+
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
+        <line
+          x1="0"
+          y1={BASELINE_Y}
+          x2={WIDTH}
+          y2={BASELINE_Y}
+          stroke="var(--color-grid)"
+          strokeDasharray="4 4"
+        />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={isSpiking ? "var(--color-signal-alert)" : "var(--color-signal-safe)"}
+          strokeWidth="2"
+        />
+      </svg>
     </div>
   );
 }
