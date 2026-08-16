@@ -8,23 +8,22 @@ const WIDTH = 800;
 const HEIGHT = 120;
 const BASELINE_Y = HEIGHT / 2;
 const MAX_POINTS = 120;
-const TICK_MS = 100; // how often the line advances
+const TICK_MS = 100;
 
 export function Waveform() {
   const [points, setPoints] = useState<Point[]>(
     Array.from({ length: MAX_POINTS }, (_, i) => ({ x: i, y: BASELINE_Y }))
   );
-  const pendingSpike = useRef(0); // how many "ticks" of spike remain
+  const [isSpiking, setIsSpiking] = useState(false);
+  const pendingSpike = useRef(0);
   const spikeHeight = useRef(0);
 
   useEffect(() => {
     function handleAnomaly(event: FlaggedEvent) {
       const ratio = event.windowCount / (event.baselineAvgCount || 1);
-      // Cap how tall the spike can visually get, so one extreme outlier
-      // doesn't flatten every other spike into invisibility.
       const height = Math.min(ratio * 8, HEIGHT / 2 - 10);
       spikeHeight.current = height;
-      pendingSpike.current = 6; // spike lasts ~6 ticks, then decays
+      pendingSpike.current = 6;
     }
 
     socket.on("anomaly", handleAnomaly);
@@ -36,30 +35,30 @@ export function Waveform() {
   useEffect(() => {
     const interval = setInterval(() => {
       setPoints((prev) => {
-        let y = BASELINE_Y;
+        let y: number;
 
         if (pendingSpike.current > 0) {
-          // Simple decay curve so the spike rises then falls, not a
-          // hard square wave — reads more like an instrument, less
-          // like a bar chart.
           const progress = pendingSpike.current / 6;
           y = BASELINE_Y - spikeHeight.current * Math.sin(progress * Math.PI);
           pendingSpike.current -= 1;
         } else {
-          // Gentle idle jitter so the line doesn't look frozen/dead
-          // when nothing is happening.
           y = BASELINE_Y + (Math.random() - 0.5) * 3;
         }
 
         const next = [...prev.slice(1), { x: 0, y }];
         return next.map((p, i) => ({ ...p, x: i }));
       });
+
+      // Update spiking state here, inside the interval callback — not
+      // read directly from the ref during render, which React's rules
+      // now flag as unsafe (ref reads should happen in effects/handlers,
+      // never in the render body itself).
+      setIsSpiking(pendingSpike.current > 0);
     }, TICK_MS);
 
     return () => clearInterval(interval);
   }, []);
 
-  const isSpiking = pendingSpike.current > 0;
   const pathD = points
     .map((p, i) => `${i === 0 ? "M" : "L"} ${(p.x / (MAX_POINTS - 1)) * WIDTH} ${p.y}`)
     .join(" ");
