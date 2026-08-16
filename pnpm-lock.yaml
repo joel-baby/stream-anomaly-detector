@@ -207,34 +207,6 @@ importers:
 
   .: {}
 
-  apps:
-    dependencies:
-      '@upstash/redis':
-        specifier: ^1.38.2
-        version: 1.38.2
-      bullmq:
-        specifier: ^6.0.10
-        version: 6.0.10(ioredis@6.0.0)
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
-      ioredis:
-        specifier: ^6.0.0
-        version: 6.0.0
-      mongodb:
-        specifier: ^7.5.0
-        version: 7.5.0
-    devDependencies:
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.2.0
-      tsx:
-        specifier: ^4.23.12
-        version: 4.23.12
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-
   apps/api:
     dependencies:
       cors:
@@ -1183,24 +1155,6 @@ packages:
     resolution: {integrity: sha512-h/C0qe6857pQhcSJHLfsR1uYGj98Ge3wKAD3Ed9KqH3wcVh+BM4Jq4xISD7vs9OPuT07n+q3QQVjslJ286j6ag==}
     engines: {node: '>=20.19.0'}
 
-  bullmq@6.0.10:
-    resolution: {integrity: sha512-OX8MvcHVGiZoo8bpQzr4sVi7FHWKi08fnJ83M7/a0ysYJq/5sKxVl3GYvTTFenPEhGVxg2QfTRG1fPX136ZEJQ==}
-    engines: {node: '>=14.17.0'}
-    peerDependencies:
-      bullmq-otel: '>=2.0.0'
-      ioredis: '>=5.0.0'
-      pg: '>=8.0.0'
-      redis: '>=5.0.0'
-    peerDependenciesMeta:
-      bullmq-otel:
-        optional: true
-      ioredis:
-        optional: true
-      pg:
-        optional: true
-      redis:
-        optional: true
-
   bullmq@6.1.0:
     resolution: {integrity: sha512-Q2Z6LcSvKLf/xDUdFhjidfi5g0qgx1Ao0UWkrWq7A+KyZnD/68iknbAZCpg/r0x9yViAUCkYDElESAffoqAtcQ==}
     engines: {node: '>=14.17.0'}
@@ -1268,10 +1222,6 @@ packages:
   cors@2.8.6:
     resolution: {integrity: sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==}
     engines: {node: '>= 0.10'}
-
-  cron-parser@5.7.0:
-    resolution: {integrity: sha512-iSpDHpwwW/GhIg4JVODYlWUEpMNSimaHvqOhHpOz1W+Y97z1lL1nf+dpcF17cNwFRpTtKN9devgi1fxflp3Phw==}
-    engines: {node: '>=18'}
 
   cron-parser@5.8.1:
     resolution: {integrity: sha512-fVw5nGEkTVmiPKo3fY0j28Thq6jR00VKWyL22llWrsbII4sDHI+8Kx1kcL+QzGQJfCfk64bbMotrgTZRpzYpLQ==}
@@ -2896,16 +2846,6 @@ snapshots:
 
   bson@7.3.1: {}
 
-  bullmq@6.0.10(ioredis@6.0.0):
-    dependencies:
-      cron-parser: 5.7.0
-      msgpackr: 2.0.5
-      node-abort-controller: 3.1.1
-      semver: 7.8.5
-      tslib: 2.8.1
-    optionalDependencies:
-      ioredis: 6.0.0
-
   bullmq@6.1.0(ioredis@6.0.0):
     dependencies:
       cron-parser: 5.8.1
@@ -2950,10 +2890,6 @@ snapshots:
     dependencies:
       object-assign: 4.1.1
       vary: 1.1.2
-
-  cron-parser@5.7.0:
-    dependencies:
-      luxon: 3.7.2
 
   cron-parser@5.8.1:
     dependencies:
